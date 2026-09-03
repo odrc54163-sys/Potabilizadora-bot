@@ -1,217 +1,210 @@
 import logging
-from datetime import datetime
-import pytz
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    ConversationHandler,
     ContextTypes,
     filters,
 )
 
-# Configuración de logs
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-# ==========================================
-# CONFIGURACIÓN DEL NEGOCIO (EDITA AQUÍ)
-# ==========================================
-TOKEN = "8925935497:AAGw8QL04CJAL02A7WXprALSKHnn9zqDRXs"
-ID_GRUPO_TRABAJO = -1004303277305  # Pon aquí el ID de tu grupo (con el signo -)
+TOKEN = "8925935497:AAGyMsnC_ryQV4SKv1KEHq8W2U6A9ketPws"
+GRUPO_ID = -1004303277305
 
-# PRECIOS EN BOLÍVARES
-PRECIO_RECARGA = 800
-PRECIO_BOTELLON_NUEVO = 5000
+user_data_store = {}
 
-# DATOS DE PAGO MÓVIL
-BANCO = "Banco Venezuela"
-CEDULA = "18912986"
-TELEFONO = "0412-3953015"
+SALUDO_INICIAL = (
+    "💧 **¡Hola! Bienvenido al sistema de pedidos de Potabilizadora Gual España!** 💧\n\n"
+    "👤 Por favor, escribe tu **nombre y apellido** para iniciar tu pedido:"
+)
 
-# Zona horaria de Venezuela
-ZONA_HORARIA = pytz.timezone('America/Caracas')
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_data_store[user_id] = {"paso": "nombre"}
+    await update.message.reply_text(SALUDO_INICIAL, parse_mode="Markdown")
 
-# Estados de la conversación
-SELECCIONAR_PRODUCTO, NOMBRE, UBICACION, COMPROBANTE = range(4)
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
 
+    if user_id not in user_data_store or "paso" not in user_data_store[user_id]:
+        user_data_store[user_id] = {"paso": "nombre"}
+        await update.message.reply_text(SALUDO_INICIAL, parse_mode="Markdown")
+        return
 
-def esta_en_horario() -> bool:
-    """Verifica si la consulta está dentro del horario (Lunes a Sábado: 8:00 AM - 5:30 PM)"""
-    ahora = datetime.now(ZONA_HORARIA)
-    dia_semana = ahora.weekday()  # 0: Lunes, 5: Sábado, 6: Domingo
-    hora_actual = ahora.time()
+    paso_actual = user_data_store[user_id].get("paso")
+
+    if paso_actual == "nombre":
+        user_data_store[user_id]["nombre"] = text
+        user_data_store[user_id]["paso"] = "telefono"
+        await update.message.reply_text("📞 Por favor, escribe tu **número de teléfono** de contacto:", parse_mode="Markdown")
+        return
+
+    if paso_actual == "telefono":
+        user_data_store[user_id]["telefono"] = text
+        user_data_store[user_id]["paso"] = "ubicacion"
+        await update.message.reply_text("📍 Escribe tu **dirección de entrega o ubicación exacta**:", parse_mode="Markdown")
+        return
+
+    if paso_actual == "ubicacion":
+        user_data_store[user_id]["ubicacion"] = text
+        user_data_store[user_id]["paso"] = "recargas"
+        await update.message.reply_text("🔄 **¿Cuántas RECARGAS de botellón deseas solicitar?**\n(Si no necesitas recargas, escribe `0`)", parse_mode="Markdown")
+        return
+
+    if paso_actual == "recargas":
+        user_data_store[user_id]["recargas"] = text
+        user_data_store[user_id]["paso"] = "botellones_nuevos"
+        await update.message.reply_text("🧴 **¿Cuántos BOTELLONES NUEVOS (con envase) deseas solicitar?**\n(Si no necesitas botellones nuevos, escribe `0`)", parse_mode="Markdown")
+        return
+
+    if paso_actual == "botellones_nuevos":
+        user_data_store[user_id]["botellones_nuevos"] = text
+        user_data_store[user_id]["paso"] = "monto"
+        await update.message.reply_text("💵 Escribe el **monto total transferido/pagado** (ejemplo: `15.00` o `500 BS`):", parse_mode="Markdown")
+        return
+
+    if paso_actual == "monto":
+        user_data_store[user_id]["monto"] = text
+        user_data_store[user_id]["paso"] = "comprobante"
+        await update.message.reply_text("💳 **¡Excelente!** Por último, envía la **foto o captura del comprobante de pago** para procesar tu pedido. 📸", parse_mode="Markdown")
+        return
+
+    if paso_actual == "comprobante":
+        await update.message.reply_text("📸 Por favor, adjunta la **foto o capture** de la transferencia para completar tu pedido.", parse_mode="Markdown")
+        return
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    data = user_data_store.get(user_id, {})
+
+    if data.get("paso") != "comprobante":
+        user_data_store[user_id] = {"paso": "nombre"}
+        await update.message.reply_text("⚠️ Para procesar tu pedido adecuadamente, primero necesitamos tus datos.\n\n" + SALUDO_INICIAL, parse_mode="Markdown")
+        return
+
+    nombre = data.get("nombre", "No especificado")
+    telefono = data.get("telefono", "No especificado")
+    ubicacion = data.get("ubicacion", "No especificada")
+    recargas = data.get("recargas", "0")
+    botellones_nuevos = data.get("botellones_nuevos", "0")
+    monto = data.get("monto", "No especificado")
     
-    # 0 a 5 es Lunes a Sábado
-    if 0 <= dia_semana <= 5:
-        hora_inicio = datetime.strptime("08:00", "%H:%M").time()
-        hora_fin = datetime.strptime("17:30", "%H:%M").time()
-        return hora_inicio <= hora_actual <= hora_fin
-    return False
+    username = update.effective_user.username
+    alias_telegram = f"@{username}" if username else "Sin alias"
 
+    caption = (
+        f"🚨 **NUEVO PEDIDO RECIBIDO** 🚨\n\n"
+        f"👤 **Cliente:** {nombre}\n"
+        f"💬 **Alias Telegram:** {alias_telegram}\n"
+        f"📞 **Teléfono:** {telefono}\n"
+        f"📍 **Ubicación:** {ubicacion}\n\n"
+        f"🛒 **DETALLE DEL PEDIDO:**\n"
+        f"🔄 **Recargas:** {recargas}\n"
+        f"🧴 **Botellones Nuevos:** {botellones_nuevos}\n"
+        f"💵 **Monto Pagado:** {monto}\n\n"
+        f"📌 **Estado:** ⏳ *Pendiente por revisar*"
+    )
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Inicio del bot y menú de productos"""
-    # Verificar horario comercial
-    if not esta_en_horario():
-        mensaje_cerrado = (
-            "🔴 *POTABILIZADORA CERRADA*\n\n"
-            "¡Hola! En este momento no nos encontramos laborando.\n\n"
-            "🕒 *Horario de atención:*\n"
-            "Lunes a Sábado: 8:00 AM - 5:30 PM\n\n"
-            "Por favor, escríbenos dentro de nuestro horario de trabajo para tomar tu pedido. ¡Gracias por preferirnos! 💧"
-        )
-        await update.message.reply_text(mensaje_cerrado, parse_mode='Markdown')
-        return ConversationHandler.END
-
-    # Menú de selección
     keyboard = [
         [
-            InlineKeyboardButton(f"💧 Recarga ({PRECIO_RECARGA} Bs)", callback_data="prod_recarga"),
-            InlineKeyboardButton(f"🛢️ Botellón Nuevo ({PRECIO_BOTELLON_NUEVO} Bs)", callback_data="prod_botellon")
+            InlineKeyboardButton("🚚 En camino", callback_data=f"encamino_{user_id}"),
+            InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{user_id}"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
-        "👋 ¡Bienvenido al Servicio de Entrega de Agua Potable!\n\n"
-        "Por favor, selecciona el producto que deseas solicitar:",
-        reply_markup=reply_markup
+    photo_file_id = update.message.photo[-1].file_id
+    await context.bot.send_photo(
+        chat_id=GRUPO_ID,
+        photo=photo_file_id,
+        caption=caption,
+        parse_mode="Markdown",
+        reply_markup=reply_markup,
     )
-    return SELECCIONAR_PRODUCTO
 
+    await update.message.reply_text(
+        "🎉 **¡Comprobante recibido con éxito!**\n\n"
+        "✨ Tu pedido ha sido enviado al equipo de despacho. Te notificaremos por aquí cuando vaya en camino. 🛵💨",
+        parse_mode="Markdown"
+    )
 
-async def seleccionar_producto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_data_store.pop(user_id, None)
+
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "prod_recarga":
-        context.user_data['producto'] = "Recarga de Botellón"
-        context.user_data['precio'] = PRECIO_RECARGA
-    else:
-        context.user_data['producto'] = "Botellón Nuevo + Agua"
-        context.user_data['precio'] = PRECIO_BOTELLON_NUEVO
+    action, target_user_id = query.data.split("_")
+    original_caption = query.message.caption or ""
 
-    await query.edit_message_text(
-        f"✅ Seleccionaste: *{context.user_data['producto']}* ({context.user_data['precio']} Bs)\n\n"
-        "✍️ Por favor, escribe tu *Nombre y Apellido* para el registro de la entrega:",
-        parse_mode='Markdown'
-    )
-    return NOMBRE
+    if action == "encamino":
+        updated_caption = original_caption.replace(
+            "📌 **Estado:** ⏳ *Pendiente por revisar*",
+            "📌 **Estado:** 🚚 *¡Pedido en camino!*"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{target_user_id}"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-
-async def pedir_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    nombre_cliente = update.message.text
-    context.user_data['nombre'] = nombre_cliente
-
-    # Crear botón para compartir ubicación GPS fácilmente
-    boton_ubicacion = KeyboardButton(text="📍 Enviar mi Ubicación GPS", request_location=True)
-    reply_markup = ReplyKeyboardMarkup([[boton_ubicacion]], resize_keyboard=True, one_time_keyboard=True)
-
-    await update.message.reply_text(
-        f"Excelente {nombre_cliente}.\n\n"
-        "📍 Toca el botón de abajo para compartir tu ubicación GPS exacta para el motorizado:",
-        reply_markup=reply_markup
-    )
-    return UBICACION
-
-
-async def pedir_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # Guardar objeto de ubicación GPS
-    context.user_data['ubicacion'] = update.message.location
-
-    mensaje_pago = (
-        "💳 *DATOS PARA PAGO MÓVIL*\n\n"
-        f"📌 *Banco:* {BANCO}\n"
-        f"📌 *Cédula / RIF:* {CEDULA}\n"
-        f"📌 *Teléfono:* {TELEFONO}\n"
-        f"💰 *Monto a Pagar:* {context.user_data['precio']} Bs\n\n"
-        "📸 Una vez realizado el pago, envía la *foto o capture del comprobante* por este chat."
-    )
-    
-    await update.message.reply_text(
-        mensaje_pago,
-        parse_mode='Markdown',
-        reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True) # Ocultar teclado de ubicación
-    )
-    return COMPROBANTE
-
-
-async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    foto_id = update.message.photo[-1].file_id
-
-    # Ficha del pedido para el grupo de trabajo
-    ficha_pedido = (
-        "🚨 *¡NUEVO PEDIDO DE AGUA!* 🚨\n\n"
-        f"👤 *Cliente:* {context.user_data['nombre']}\n"
-        f"📲 *Telegram User:* @{user.username if user.username else 'Sin alias'}\n"
-        f"📦 *Producto:* {context.user_data['producto']}\n"
-        f"💵 *Monto:* {context.user_data['precio']} Bs\n\n"
-        "📌 *Adjunto comprobante de pago y ubicación GPS para la entrega.*"
-    )
-
-    try:
-        # 1. Enviar comprobante de pago al grupo
-        await context.bot.send_photo(
-            chat_id=ID_GRUPO_TRABAJO,
-            photo=foto_id,
-            caption=ficha_pedido,
-            parse_mode='Markdown'
+        await query.edit_message_caption(
+            caption=updated_caption,
+            parse_mode="Markdown",
+            reply_markup=reply_markup
         )
 
-        # 2. Enviar la ubicación GPS al grupo
-        loc = context.user_data['ubicacion']
-        await context.bot.send_location(
-            chat_id=ID_GRUPO_TRABAJO,
-            latitude=loc.latitude,
-            longitude=loc.longitude
+        try:
+            await context.bot.send_message(
+                chat_id=int(target_user_id),
+                text="🛵💨 **¡Buenas noticias!** Tu pedido de la Potabilizadora Gual España va **en camino** a tu ubicación.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"No se pudo notificar al usuario {target_user_id}: {e}")
+
+    elif action == "entregado":
+        updated_caption = original_caption.replace(
+            "📌 **Estado:** ⏳ *Pendiente por revisar*",
+            "📌 **Estado:** ✅ *¡Pedido Entregado!*"
+        ).replace(
+            "📌 **Estado:** 🚚 *¡Pedido en camino!*",
+            "📌 **Estado:** ✅ *¡Pedido Entregado!*"
         )
 
-        # Confirmación al cliente
-        await update.message.reply_text(
-            "✅ *¡Pedido registrado con éxito!*\n\n"
-            "Hemos recibido tu comprobante y tu ubicación. El equipo de administración procesará tu entrega a la brevedad.\n\n"
-            "¡Gracias por tu compra! 💧",
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logging.error(f"Error al enviar al grupo: {e}")
-        await update.message.reply_text(
-            "⚠️ Hubo un detalle al notificar al equipo, pero tu registro fue guardado. Nos comunicaremos contigo a la brevedad."
+        await query.edit_message_caption(
+            caption=updated_caption,
+            parse_mode="Markdown",
+            reply_markup=None
         )
 
-    return ConversationHandler.END
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Pedido cancelado. Escribe /start cuando desees realizar un nuevo pedido.")
-    return ConversationHandler.END
-
+        try:
+            await context.bot.send_message(
+                chat_id=int(target_user_id),
+                text="🎉 **¡Tu pedido ha sido entregado con éxito!**\n\nGracias por confiar en Potabilizadora Gual España. ¡Que disfrutes de tu agua purificada! 💧✨",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"No se pudo notificar al usuario {target_user_id}: {e}")
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            SELECCIONAR_PRODUCTO: [CallbackQueryHandler(seleccionar_producto)],
-            NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, pedir_nombre)],
-            UBICACION: [MessageHandler(filters.LOCATION, pedir_ubicacion)],
-            COMPROBANTE: [MessageHandler(filters.PHOTO, recibir_comprobante)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_buttons))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    app.add_handler(conv_handler)
+    print("Iniciando el bot de pedidos de Potabilizadora Gual España...")
+    application.run_polling()
 
-    print("Bot de la Potabilizadora ejecutándose correctamente...")
-    app.run_polling()
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
