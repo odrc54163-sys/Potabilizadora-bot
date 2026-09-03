@@ -257,7 +257,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🎉 **¡Pedido registrado con éxito!**\n\n"
-            "✨ Pagaras en efectivo al recibir tu pedido. El motorizado va en camino o será despachado pronto. 🛵💨",
+            "✨ Pagarás en efectivo al recibir tu pedido. El motorizado va en camino o será despachado pronto. 🛵💨",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -451,7 +451,7 @@ async def cmd_reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Comandos
+    # Comandos (Ya no existe cmd_estadisticas aquí, por lo que el comando queda eliminado por completo)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancelar", cancelar_pedido))
     application.add_handler(CommandHandler("reiniciar", cmd_reiniciar))
@@ -471,7 +471,7 @@ def main():
         time=time(hour=18, minute=30, tzinfo=LOCAL_TZ)
     )
 
-    print("Iniciando bot con selección de pago (Efectivo o Pago Móvil)...")
+    print("Iniciando bot con selección de pago y sin estadísticas públicas...")
     application.run_polling()
 
 if __name__ == "__main__":
