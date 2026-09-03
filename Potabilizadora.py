@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, time
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -17,41 +17,96 @@ logging.basicConfig(
 
 TOKEN = "8925935497:AAGkVr_kAf4VCyZUAvNVwMFmFqVcBRnj7-w"
 GRUPO_ID = -1004303277305
-TELEFONO_ADMIN = "+58 412-9511145"  # <--- Cambia esto por el número de contacto de la administración si deseas
+TELEFONO_ADMIN = "+58 412-9511145"  # <--- Cambia esto por tu número de contacto para pago falso
 
-# Zona horaria local (ej. Caracas, Venezuela)
+# ==========================================
+# DATOS DE PAGO MÓVIL (MODIFÍCALOS AQUÍ)
+# ==========================================
+BANCO_PAGO = "Banco Venezuela"                  # <--- Pon aquí el nombre de tu banco
+TELEFONO_PAGO = "0412-"                     # <--- Pon aquí el teléfono de pago móvil
+CEDULA_RIF_PAGO = "V-18912986"                     # <--- Pon aquí tu Cédula o RIF
+
+# Zona horaria local (Venezuela)
 LOCAL_TZ = pytz.timezone('America/Caracas')
 
 user_data_store = {}
-# Almacén de estadísticas del día
 estadisticas_dia = {
     "dinero_total": 0.0,
     "viajes_realizados": 0,
-    "historial_viajes": []  # Guardará los registros de cada pedido completado con su hora
+    "historial_viajes": []
 }
 
-PRECIO_RECARGA = 800.0  # Ajusta aquí el precio de la recarga
-PRECIO_BOTELLON_NUEVO = 2500.0  # Ajusta aquí el precio del botellón nuevo con envase
+PRECIO_RECARGA = 800.0  
+PRECIO_BOTELLON_NUEVO = 5000.0  
+
+def verificar_horario():
+    """Valida si la potabilizadora está abierta según el día y la hora de Venezuela."""
+    ahora = datetime.now(LOCAL_TZ)
+    dia_semana = ahora.weekday()  # Lunes = 0, Domingo = 6
+    hora_actual = ahora.time()
+
+    if dia_semana == 6:
+        return False, "Domingos cerrado todo el día."
+
+    hora_apertura = datetime.strptime("08:00", "%H:%M").time()
+    hora_cierre = datetime.strptime("17:30", "%H:%M").time()
+
+    if hora_apertura <= hora_actual <= hora_cierre:
+        return True, "Abierto"
+    else:
+        return False, "Fuera de horario (Laboramos de Lunes a Sábado de 8:00 AM a 5:30 PM)."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    abierto, mensaje_horario = verificar_horario()
+    if not abierto:
+        await update.message.reply_text(
+            f"🚨 🚫 **¡Lo sentimos, potabilizadora Cerrada en este momento!** 🚫 🛑\n\n"
+            f"📅 **Horario de atención:**\n"
+            f"• 🕒 *Lunes a Sábado:* 8:00 AM - 5:30 PM\n"
+            f"• 🛑 *Domingos:* Cerrado todo el día\n\n"
+            f"💬 *Motivo:* {mensaje_horario}\n\n"
+            f"✨ Te esperamos en nuestro horario habitual de trabajo para atender tu pedido con gusto. 💧🏃‍♂️",
+            parse_mode="Markdown"
+        )
+        return
+
     user_id = update.effective_user.id
     user_data_store[user_id] = {"paso": "eleccion"}
     
     keyboard = [
-        [InlineKeyboardButton("🔄 Recarga de agua", callback_data="op_recarga")],
-        [InlineKeyboardButton("🧴 Botellón nuevo (con envase)", callback_data="op_nuevo")],
-        [InlineKeyboardButton("📦 Ambos (Recarga + Envase nuevo)", callback_data="op_ambos")]
+        [InlineKeyboardButton("🔄 Recarga (800 BS)", callback_data="op_recarga")],
+        [InlineKeyboardButton("🧴 Botellón Nuevo (5.000 BS)", callback_data="op_nuevo")],
+        [InlineKeyboardButton("📦 Ambos", callback_data="op_ambos")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
         "💧 **¡Bienvenido a Potabilizadora Gual España!** 💧\n\n"
-        "Por favor, selecciona qué deseas solicitar:",
+        "Por favor, selecciona qué deseas solicitar:\n\n"
+        "💡 *Escribe* `/cancelar` *en cualquier momento si deseas anular tu solicitud.*",
         parse_mode="Markdown",
         reply_markup=reply_markup
     )
 
+async def cancelar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Permite al usuario cancelar su proceso de pedido actual."""
+    user_id = update.effective_user.id
+    if user_id in user_data_store:
+        user_data_store.pop(user_id, None)
+    
+    await update.message.reply_text(
+        "❌ **Pedido cancelado con éxito.**\n\n"
+        "Si deseas iniciar uno nuevo más tarde, escribe /start. ¡Feliz día! 💧",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
 async def handle_callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    abierto, _ = verificar_horario()
+    if not abierto:
+        await update.callback_query.answer("El horario de atención ha finalizado.", show_alert=True)
+        return
+
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -70,11 +125,17 @@ async def handle_callback_eleccion(update: Update, context: ContextTypes.DEFAULT
     user_data_store[user_id]["paso"] = "cantidad"
     await query.edit_message_text(
         f"Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}*.\n\n"
-        "🔢 ¿Cuántas unidades deseas solicitar?",
+        "🔢 ¿Cuántas unidades deseas solicitar?\n"
+        "*(Recuerda que puedes escribir /cancelar si deseas anular)*",
         parse_mode="Markdown"
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    abierto, _ = verificar_horario()
+    if not abierto:
+        await update.message.reply_text("🚫 Lo sentimos, potabilizadora Cerrada en este momento. Escribe /start para ver el horario.")
+        return
+
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
@@ -90,18 +151,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cantidad <= 0:
                 raise ValueError()
         except ValueError:
-            await update.message.reply_text("⚠️ Por favor, introduce un número válido mayor a 0:")
+            await update.message.reply_text("⚠️ Por favor, introduce un número válido mayor a 0 (o escribe /cancelar):")
             return
 
         user_data_store[user_id]["cantidad"] = cantidad
         tipo = user_data_store[user_id]["tipo_pedido"]
         
-        # Calcular monto automático
         if tipo == "Recarga":
             monto = cantidad * PRECIO_RECARGA
         elif tipo == "Botellón Nuevo":
             monto = cantidad * PRECIO_BOTELLON_NUEVO
-        else: # Ambos (asumimos 1 y 1 o calculo base)
+        else:
             monto = cantidad * (PRECIO_RECARGA + PRECIO_BOTELLON_NUEVO)
             
         user_data_store[user_id]["monto_calculado"] = monto
@@ -124,12 +184,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_store[user_id]["telefono"] = text
         user_data_store[user_id]["paso"] = "ubicacion"
         
-        # Botón para compartir ubicación GPS real
         location_keyboard = [[KeyboardButton("📍 Compartir ubicación GPS exacta", request_location=True)]]
         reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
 
         await update.message.reply_text(
-            "📍 Para que el motorizado llegue sin problemas, por favor presiona el botón de abajo para **compartir tu ubicación GPS exacta**:",
+            "📍 Para que el motorizado llegue sin problemas, presiona el botón de abajo para **compartir tu ubicación GPS exacta**:",
             reply_markup=reply_markup
         )
         return
@@ -150,13 +209,17 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     monto = user_data_store[user_id]["monto_calculado"]
 
+    # Aquí se usan automáticamente las variables de arriba
     await update.message.reply_text(
         f"✅ ¡Ubicación recibida con éxito!\n\n"
-        f"💳 **Datos para el pago:**\n"
-        f"Monto a transferir: *{monto:,.2f} BS*\n"
-        f"(Realiza tu pago móvil y envía la foto del comprobante por aquí) 📸",
+        f"💳 **DATOS PARA EL PAGO MÓVIL:**\n"
+        f"🏦 **Banco:** {BANCO_PAGO}\n"
+        f"📱 **Teléfono:** {TELEFONO_PAGO}\n"
+        f"🆔 **Cédula/RIF:** {CEDULA_RIF_PAGO}\n"
+        f"💵 **Monto exacto:** *{monto:,.2f} BS*\n\n"
+        f"Realiza tu pago y **envía la foto del comprobante por aquí**. 📸",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove() # Quita el botón de ubicación del chat
+        reply_markup=ReplyKeyboardRemove()
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -189,16 +252,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = [
-        [
-            InlineKeyboardButton("✅ Pago Válido (En camino)", callback_data=f"encamino_{user_id}_{monto}"),
-            InlineKeyboardButton("❌ Pago Falso", callback_data=f"pagofalso_{user_id}"),
-        ]
+        [InlineKeyboardButton("🛵 En camino", callback_data=f"encamino_{user_id}_{monto}")],
+        [InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{user_id}_{monto}")],
+        [InlineKeyboardButton("❌ Pago Falso", callback_data=f"pagofalso_{user_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     photo_file_id = update.message.photo[-1].file_id
 
-    # Enviar foto al grupo
     await context.bot.send_photo(
         chat_id=GRUPO_ID,
         photo=photo_file_id,
@@ -207,7 +268,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
     )
 
-    # Enviar ubicación GPS al grupo si está disponible
     if lat and lon:
         await context.bot.send_location(
             chat_id=GRUPO_ID,
@@ -241,7 +301,8 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         keyboard = [
-            [InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{target_user_id}_{monto_pedido}")]
+            [InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{target_user_id}_{monto_pedido}")],
+            [InlineKeyboardButton("❌ Pago Falso", callback_data=f"pagofalso_{target_user_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -256,34 +317,19 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"No se pudo notificar al usuario: {e}")
 
-    elif action == "pagofalso":
-        updated_caption = original_caption.replace(
-            "📌 **Estado:** ⏳ *Pendiente por verificar pago*",
-            "📌 **Estado:** ❌ *Rechazado - Pago Falso/Inválido*"
-        )
-
-        await query.edit_message_caption(caption=updated_caption, parse_mode="Markdown", reply_markup=None)
-
-        try:
-            await context.bot.send_message(
-                chat_id=target_user_id,
-                text=f"⚠️ **Atención:** Su comprobante no pudo ser verificado o el pago no se reflejó.\n\n"
-                     f"Por favor, comuníquese directamente con la administración al número: *{TELEFONO_ADMIN}* para solventar su pedido.",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logging.error(f"No se pudo notificar al usuario de pago falso: {e}")
-
     elif action == "entregado":
         monto_pedido = float(partes[2])
         hora_actual_str = datetime.now(LOCAL_TZ).strftime('%H:%M:%S')
 
-        # Registrar estadísticas del día
         estadisticas_dia["dinero_total"] += monto_pedido
         estadisticas_dia["viajes_realizados"] += 1
         estadisticas_dia["historial_viajes"].append(f"• Pedido entregado a las {hora_actual_str} ({monto_pedido:,.2f} BS)")
 
         updated_caption = original_caption.replace(
+            "📌 **Estado:** ⏳ *Pendiente por verificar pago*",
+            "📌 **Estado:** ✅ *¡Pedido Entregado con Éxito!*"
+        )
+        updated_caption = updated_caption.replace(
             "📌 **Estado:** 🚚 *¡Pago verificado! Pedido en camino*",
             "📌 **Estado:** ✅ *¡Pedido Entregado con Éxito!*"
         )
@@ -299,6 +345,28 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"No se pudo notificar la entrega: {e}")
 
+    elif action == "pagofalso":
+        updated_caption = original_caption.replace(
+            "📌 **Estado:** ⏳ *Pendiente por verificar pago*",
+            "📌 **Estado:** ❌ *Rechazado - Pago Falso/Inválido*"
+        )
+        updated_caption = updated_caption.replace(
+            "📌 **Estado:** 🚚 *¡Pago verificado! Pedido en camino*",
+            "📌 **Estado:** ❌ *Rechazado - Pago Falso/Inválido*"
+        )
+
+        await query.edit_message_caption(caption=updated_caption, parse_mode="Markdown", reply_markup=None)
+
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"⚠️ **Atención:** Su comprobante no pudo ser verificado o el pago no se reflejó.\n\n"
+                     f"Por favor, comuníquese directamente con la administración al número: *{TELEFONO_ADMIN}* para solventar su pedido.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"No se pudo notificar al usuario de pago falso: {e}")
+
 async def cmd_estadisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dinero = estadisticas_dia["dinero_total"]
     viajes = estadisticas_dia["viajes_realizados"]
@@ -312,6 +380,23 @@ async def cmd_estadisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(texto_stats, parse_mode="Markdown")
 
+async def enviar_reporte_automatico(context: ContextTypes.DEFAULT_TYPE):
+    """Función que se ejecuta automáticamente a las 6:30 PM para enviar las estadísticas al grupo."""
+    dinero = estadisticas_dia["dinero_total"]
+    viajes = estadisticas_dia["viajes_realizados"]
+    historial = "\n".join(estadisticas_dia["historial_viajes"]) if estadisticas_dia["historial_viajes"] else "No hay viajes registrados hoy."
+
+    texto_stats = (
+        f"📊 **REPORTE AUTOMÁTICO DE CIERRE (6:30 PM)** 📊\n\n"
+        f"💵 **Dinero total reunido:** {dinero:,.2f} BS\n"
+        f"🛵 **Total de viajes realizados:** {viajes}\n\n"
+        f"⏰ **Detalle de horarios de viajes:**\n{historial}"
+    )
+    try:
+        await context.bot.send_message(chat_id=GRUPO_ID, text=texto_stats, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"No se pudo enviar el reporte automático: {e}")
+
 async def cmd_reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     estadisticas_dia["dinero_total"] = 0.0
     estadisticas_dia["viajes_realizados"] = 0
@@ -322,16 +407,27 @@ async def cmd_reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TOKEN).build()
 
+    # Comandos
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("cancelar", cancelar_pedido))
     application.add_handler(CommandHandler("estadisticas", cmd_estadisticas))
     application.add_handler(CommandHandler("reiniciar", cmd_reiniciar))
+
+    # Botones y mensajes
     application.add_handler(CallbackQueryHandler(handle_callback_eleccion, pattern="^op_"))
     application.add_handler(CallbackQueryHandler(handle_buttons))
     application.add_handler(MessageHandler(filters.LOCATION, handle_location))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Iniciando el bot completo de Potabilizadora Gual España...")
+    # Configurar la tarea automática de las estadísticas a las 6:30 PM (18:30) hora de Venezuela
+    job_queue = application.job_queue
+    job_queue.run_daily(
+        enviar_reporte_automatico,
+        time=time(hour=18, minute=30, tzinfo=LOCAL_TZ)
+    )
+
+    print("Iniciando bot con datos de pago organizados y reporte automático...")
     application.run_polling()
 
 if __name__ == "__main__":
