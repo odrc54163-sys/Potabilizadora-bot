@@ -17,14 +17,14 @@ logging.basicConfig(
 
 TOKEN = "8925935497:AAGkVr_kAf4VCyZUAvNVwMFmFqVcBRnj7-w"
 GRUPO_ID = -1004303277305
-TELEFONO_ADMIN = "+58 412-9511145"  # <--- Cambia esto por tu número de contacto para pago falso
+TELEFONO_ADMIN = "+58 412-9511145"  # Número de contacto para pago falso
 
 # ==========================================
-# DATOS DE PAGO MÓVIL (MODIFÍCALOS AQUÍ)
+# DATOS DE PAGO MÓVIL CONFIGURADOS
 # ==========================================
-BANCO_PAGO = "Banco Venezuela"                  # <--- Pon aquí el nombre de tu banco
-TELEFONO_PAGO = "0412-"                     # <--- Pon aquí el teléfono de pago móvil
-CEDULA_RIF_PAGO = "V-18912986"                     # <--- Pon aquí tu Cédula o RIF
+BANCO_PAGO = "Banco de Venezuela"
+TELEFONO_PAGO = "0412-3953015"
+CEDULA_RIF_PAGO = "18.912.986"
 
 # Zona horaria local (Venezuela)
 LOCAL_TZ = pytz.timezone('America/Caracas')
@@ -209,7 +209,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     monto = user_data_store[user_id]["monto_calculado"]
 
-    # Aquí se usan automáticamente las variables de arriba
     await update.message.reply_text(
         f"✅ ¡Ubicación recibida con éxito!\n\n"
         f"💳 **DATOS PARA EL PAGO MÓVIL:**\n"
@@ -427,7 +426,7 @@ def main():
         time=time(hour=18, minute=30, tzinfo=LOCAL_TZ)
     )
 
-    print("Iniciando bot con datos de pago organizados y reporte automático...")
+    print("Iniciando bot con datos de pago configurados y reporte automático...")
     application.run_polling()
 
 if __name__ == "__main__":
