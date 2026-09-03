@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-TOKEN = "8925935497:AAGyMsnC_ryQV4SKv1KEHq8W2U6A9ketPws"
+TOKEN = "8925935497:AAGkVr_kAf4VCyZUAvNVwMFmFqVcBRnj7-w"
 GRUPO_ID = -1004303277305
 TELEFONO_ADMIN = "+58 412-9511145"
 
