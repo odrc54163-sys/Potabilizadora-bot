@@ -49,7 +49,7 @@ def verificar_horario():
     if dia_semana == 6:
         return False, "Domingos: Cerrado todo el día"
 
-    # Lunes a Sábado (0 a 5) de 8:00 AM a 5:30 PM
+    # Lunes a Sábado (0 a 5) de 8:00 AM a 5:30 PM (17:30)
     hora_apertura = time(8, 0)
     hora_cierre = time(17, 30)
 
@@ -59,6 +59,7 @@ def verificar_horario():
         return False, "Fuera de horario (Laboramos de Lunes a Sábado de 8:00 AM a 5:30 PM)"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Validar el horario antes de dejar usar el bot
     abierto, motivo = verificar_horario()
     if not abierto:
         await update.message.reply_text(
@@ -75,7 +76,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data_store[user_id] = {"paso": "eleccion"}
     
-    # Se eliminó la opción de "Ambos" para evitar confusiones
+    # Menú limpio sin la opción "Ambos"
     keyboard = [
         [InlineKeyboardButton("🔄 Recarga (800 BS)", callback_data="op_recarga")],
         [InlineKeyboardButton("🧴 Botellón Nuevo (5.000 BS)", callback_data="op_nuevo")]
@@ -104,6 +105,16 @@ async def cancelar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Doble validación por si el usuario abre el menú y pasa la hora mientras decide
+    abierto, _ = verificar_horario()
+    if not abierto:
+        await update.callback_query.answer("⚠️ Horario de atención finalizado", show_alert=True)
+        await update.callback_query.edit_message_text(
+            "🚫 **El horario de atención ha finalizado.** Ya no se pueden procesar solicitudes por hoy.",
+            parse_mode="Markdown"
+        )
+        return
+
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -491,7 +502,7 @@ def main():
         time=time(hour=18, minute=30, tzinfo=LOCAL_TZ)
     )
 
-    print("Iniciando bot con horario activo y sin opción de ambos...")
+    print("Iniciando bot con horario estricto (Lun-Sáb 8am-5:30pm) y menú limpio...")
     application.run_polling()
 
 if __name__ == "__main__":
