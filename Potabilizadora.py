@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-TOKEN = "8925935497:AAGkVr_kAf4VCyZUAvNVwMFmFqVcBRnj7-w"
+TOKEN = "8925935497:AAGyMsnC_ryQV4SKv1KEHq8W2U6A9ketPws"
 GRUPO_ID = -1004303277305
 TELEFONO_ADMIN = "+58 412-9511145"
 
@@ -40,17 +40,45 @@ PRECIO_RECARGA = 800.0
 PRECIO_BOTELLON_NUEVO = 5000.0  
 
 def verificar_horario():
-    """Bot configurado 24/7 sin restricciones de horario."""
-    return True, "Abierto"
+    """Verifica si la potabilizadora está abierta según el día y la hora."""
+    ahora = datetime.now(LOCAL_TZ)
+    dia_semana = ahora.weekday()  # Lunes = 0, Domingo = 6
+    hora_actual = ahora.time()
+
+    # Si es domingo (6), está cerrado todo el día
+    if dia_semana == 6:
+        return False, "Domingos: Cerrado todo el día"
+
+    # Lunes a Sábado (0 a 5) de 8:00 AM a 5:30 PM
+    hora_apertura = time(8, 0)
+    hora_cierre = time(17, 30)
+
+    if hora_apertura <= hora_actual <= hora_cierre:
+        return True, "Abierto"
+    else:
+        return False, "Fuera de horario (Laboramos de Lunes a Sábado de 8:00 AM a 5:30 PM)"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    abierto, motivo = verificar_horario()
+    if not abierto:
+        await update.message.reply_text(
+            f"🚫 **¡Lo sentimos, potabilizadora Cerrada en este momento!** 🚫\n\n"
+            f"⏱️ **Horario de atención:**\n"
+            f"• Lunes a Sábado: 8:00 AM - 5:30 PM\n"
+            f"• Domingos: Cerrado todo el día\n\n"
+            f"💬 **Motivo:** {motivo}.\n\n"
+            f"✨ Te esperamos en nuestro horario habitual de trabajo para atender tu pedido con gusto. 💧🚶‍♂️",
+            parse_mode="Markdown"
+        )
+        return
+
     user_id = update.effective_user.id
     user_data_store[user_id] = {"paso": "eleccion"}
     
+    # Se eliminó la opción de "Ambos" para evitar confusiones
     keyboard = [
         [InlineKeyboardButton("🔄 Recarga (800 BS)", callback_data="op_recarga")],
-        [InlineKeyboardButton("🧴 Botellón Nuevo (5.000 BS)", callback_data="op_nuevo")],
-        [InlineKeyboardButton("📦 Ambos", callback_data="op_ambos")]
+        [InlineKeyboardButton("🧴 Botellón Nuevo (5.000 BS)", callback_data="op_nuevo")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -88,8 +116,6 @@ async def handle_callback_eleccion(update: Update, context: ContextTypes.DEFAULT
         user_data_store[user_id]["tipo_pedido"] = "Recarga"
     elif data_tipo == "op_nuevo":
         user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo"
-    elif data_tipo == "op_ambos":
-        user_data_store[user_id]["tipo_pedido"] = "Recarga y Botellón Nuevo"
 
     user_data_store[user_id]["paso"] = "cantidad"
     await query.edit_message_text(
@@ -144,10 +170,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if tipo == "Recarga":
             monto = cantidad * PRECIO_RECARGA
-        elif tipo == "Botellón Nuevo":
-            monto = cantidad * PRECIO_BOTELLON_NUEVO
         else:
-            monto = cantidad * (PRECIO_RECARGA + PRECIO_BOTELLON_NUEVO)
+            monto = cantidad * PRECIO_BOTELLON_NUEVO
             
         user_data_store[user_id]["monto_calculado"] = monto
         user_data_store[user_id]["paso"] = "metodo_pago"
@@ -224,7 +248,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
     else:
-        # Flujo de Efectivo: Envía el pedido directamente al grupo sin pedir comprobante
         caption = (
             f"🚨 **NUEVO PEDIDO DE AGUA** 🚨\n\n"
             f"👤 **Cliente:** {nombre}\n"
@@ -451,12 +474,10 @@ async def cmd_reiniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Comandos (Ya no existe cmd_estadisticas aquí, por lo que el comando queda eliminado por completo)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancelar", cancelar_pedido))
     application.add_handler(CommandHandler("reiniciar", cmd_reiniciar))
 
-    # Botones y mensajes
     application.add_handler(CallbackQueryHandler(handle_callback_eleccion, pattern="^op_"))
     application.add_handler(CallbackQueryHandler(handle_callback_pago, pattern="^pay_"))
     application.add_handler(CallbackQueryHandler(handle_buttons))
@@ -464,14 +485,13 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    # Configurar la tarea automática de las estadísticas a las 6:30 PM (18:30) hora de Venezuela
     job_queue = application.job_queue
     job_queue.run_daily(
         enviar_reporte_automatico,
         time=time(hour=18, minute=30, tzinfo=LOCAL_TZ)
     )
 
-    print("Iniciando bot con selección de pago y sin estadísticas públicas...")
+    print("Iniciando bot con horario activo y sin opción de ambos...")
     application.run_polling()
 
 if __name__ == "__main__":
