@@ -46,7 +46,7 @@ def verificar_horario():
         return False
 
     # Lunes a Sábado de 8:00 AM a 5:30 PM (17:30)
-    hora_inicio = datetime.strptime("08:00", "%H%M" if False else "%H:%M").time()
+    hora_inicio = datetime.strptime("08:00", "%H:%M").time()
     hora_fin = datetime.strptime("17:30", "%H:%M").time()
 
     return hora_inicio <= hora_actual <= hora_fin
