@@ -131,6 +131,10 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text
 
     if user_id not in user_data_store or "paso" not in user_data_store[user_id]:
+        await update.message.reply_text(
+            "¡Hola! 👋 Para iniciar un pedido en la *Potabilizadora Gual España*, por favor envíame el comando /start",
+            parse_mode="Markdown"
+        )
         return
 
     paso = user_data_store[user_id]["paso"]
