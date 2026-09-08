@@ -6,8 +6,6 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
 )
 from telegram.ext import (
     Application,
@@ -52,8 +50,8 @@ def verificar_horario():
     return hora_inicio <= hora_actual <= hora_fin
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /start para iniciar el bot y verificar horarios."""
+async def mostrar_bienvenida_o_cerrado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Función central que valida horario y muestra los botones o el aviso de cerrado directamente."""
     if not verificar_horario():
         mensaje_cerrado = (
             "🚨 *¡POTABILIZADORA CERRADA!* 🚨\n\n"
@@ -72,6 +70,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data_store:
         user_data_store[user_id] = {}
 
+    # Aquí puedes ajustar los precios o nombres si lo deseas
     teclado = [
         [
             InlineKeyboardButton(
@@ -96,45 +95,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja la selección del tipo de producto."""
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {}
-
-    data_tipo = query.data
-
-    if data_tipo == "op_recarga":
-        user_data_store[user_id]["tipo_pedido"] = "Recarga de Botellón"
-    elif data_tipo == "op_nuevo":
-        user_data_store[user_id]["tipo_pedido"] = (
-            "Botellón Nuevo (Con Envase)"
-        )
-
-    user_data_store[user_id]["paso"] = "cantidad"
-    await query.edit_message_text(
-        text=(
-            f"📦 Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}*.\n\n"
-            "🔢 ¿Cuántas unidades deseas solicitar?\n\n"
-            "*(Recuerda que puedes escribir /cancelar si deseas anular)*"
-        ),
-        parse_mode="Markdown",
-    )
-
-
 async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja los textos ingresados por el usuario (cantidad, dirección, etc.)."""
+    """Maneja los textos ingresados por el usuario (si está escribiendo cantidad, dirección o mandó un texto libre)."""
     user_id = update.effective_user.id
     texto = update.message.text
 
+    # Si el usuario NO está a mitad de un pedido (cantidad/dirección), interpretamos cualquier texto como un saludo para abrir el menú principal
     if user_id not in user_data_store or "paso" not in user_data_store[user_id]:
-        await update.message.reply_text(
-            "¡Hola! 👋 Para iniciar un pedido en la *Potabilizadora Gual España*, por favor envíame el comando /start",
-            parse_mode="Markdown"
-        )
+        await mostrar_bienvenida_o_cerrado(update, context)
         return
 
     paso = user_data_store[user_id]["paso"]
@@ -171,6 +139,35 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja la selección del tipo de producto."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if user_id not in user_data_store:
+        user_data_store[user_id] = {}
+
+    data_tipo = query.data
+
+    if data_tipo == "op_recarga":
+        user_data_store[user_id]["tipo_pedido"] = "Recarga de Botellón"
+    elif data_tipo == "op_nuevo":
+        user_data_store[user_id]["tipo_pedido"] = (
+            "Botellón Nuevo (Con Envase)"
+        )
+
+    user_data_store[user_id]["paso"] = "cantidad"
+    await query.edit_message_text(
+        text=(
+            f"📦 Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}*.\n\n"
+            "🔢 ¿Cuántas unidades deseas solicitar?\n\n"
+            "*(Recuerda que puedes escribir /cancelar si deseas anular)*"
+        ),
+        parse_mode="Markdown",
+    )
+
+
 async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja el método de pago seleccionado y genera el resumen para el grupo."""
     query = update.callback_query
@@ -191,7 +188,6 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cantidad = datos.get("cantidad", "1")
     direccion = datos.get("direccion", "Sin dirección")
 
-    # Mensaje detallado que llega al grupo de administración con botón de verificar
     mensaje_grupo = (
         f"🚨 *¡NUEVO PEDIDO RECIBIDO!* 🚨\n\n"
         f"👤 *Cliente:* {query.from_user.full_name}\n"
@@ -220,12 +216,10 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(teclado_admin)
 
-    # Enviar al grupo de administración
     await context.bot.send_message(
         chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=reply_markup, parse_mode="Markdown"
     )
 
-    # Confirmación al cliente en privado
     await query.edit_message_text(
         text=(
             "🎉 *¡Comprobante enviado con éxito!*\n\n"
@@ -240,7 +234,7 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_acciones_admin(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    """Maneja las acciones del panel de administración (Verificado, En camino, Entregado)."""
+    """Maneja las acciones del panel de administración."""
     query = update.callback_query
     await query.answer()
 
@@ -251,7 +245,7 @@ async def callback_acciones_admin(
     if accion == "verificado":
         mensaje_cliente = (
             "✅ *¡Su pago ha sido verificado con éxito!*\n\n"
-            "Pronto le enviaremos su pedido (recarga o botellón nuevo, según lo que haya solicitado). ¡Gracias por preferirnos! 💧✨"
+            "Pronto le enviaremos su pedido (recarga o botellón nuevo). ¡Gracias por preferirnos! 💧✨"
         )
         await context.bot.send_message(
             chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
@@ -276,7 +270,7 @@ async def callback_acciones_admin(
     elif accion == "encamino":
         mensaje_cliente = (
             "🛵 *¡Su pedido va en camino!*\n\n"
-            "El motorizado se dirige hacia su ruta. Por favor, manténgase atento a su teléfono por si el repartidor no logra localizarle. 📞💧"
+            "El motorizado se dirige hacia su ruta. Por favor, manténgase atento a su teléfono. 📞💧"
         )
         await context.bot.send_message(
             chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
@@ -300,7 +294,8 @@ def main():
     """Función principal para ejecutar el bot."""
     application = Application.builder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
+    # Tanto /start como cualquier texto libre activarán el menú principal o la verificación de horario
+    application.add_handler(CommandHandler("start", mostrar_bienvenida_o_cerrado))
     application.add_handler(
         CallbackQueryHandler(
             callback_eleccion, pattern="^op_.*"
