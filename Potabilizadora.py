@@ -33,16 +33,19 @@ TOKEN = "8925935497:AAEGyl40GCpChO-zBCArrSNLioD5dOUNKfY"
 GRUPO_ID = -1004303277305
 
 # 📌 TUS DATOS REALES DE PAGO MÓVIL Y ADMINISTRACIÓN
-TELEFONO_ADMIN = "0412-9513015"
+TELEFONO_ADMIN = "0412-9511145"
 PAGO_MOVIL_BANCO = "Banco Venezuela"
 PAGO_MOVIL_TELEFONO = "0412-9513015"
 PAGO_MOVIL_CEDULA = "18.912.986"
+
+# PRECIO UNITARIO (Ajusta aquí si deseas cambiar el costo por unidad)
+PRECIO_UNITARIO = 800
 
 # Almacenamiento temporal de datos de los usuarios en memoria
 user_data_store = {}
 
 
-# --- SERVIDOR WEB FALSO PARA COMPLACER A RENDER Y UPTIMEROBOT ---
+# --- SERVIDOR WEB FALSO PARA RENDER Y UPTIMEROBOT ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -61,7 +64,6 @@ def iniciar_servidor_web():
 
 
 def verificar_horario():
-    """Verifica si la potabilizadora está en horario laboral (Lunes a Sábado de 8:00 AM a 5:30 PM, Hora de Venezuela)."""
     tz = pytz.timezone("America/Caracas")
     ahora = datetime.now(tz)
     dia_semana = ahora.weekday()  # Lunes = 0, Domingo = 6
@@ -74,6 +76,19 @@ def verificar_horario():
     hora_fin = datetime.strptime("17:30", "%H:%M").time()
 
     return hora_inicio <= hora_actual <= hora_fin
+
+
+async def cancelar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in user_data_store:
+        user_data_store.pop(user_id, None)
+    
+    await update.message.reply_text(
+        "❌ *Has cancelado el pedido actual.*\n\n"
+        "Puedes iniciar uno nuevo en cualquier momento enviando /start.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
 
 
 async def mostrar_bienvenida_o_cerrado(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,8 +107,7 @@ async def mostrar_bienvenida_o_cerrado(update: Update, context: ContextTypes.DEF
     user = update.effective_user
     user_id = user.id
 
-    if user_id not in user_data_store:
-        user_data_store[user_id] = {}
+    user_data_store[user_id] = {}
 
     teclado = [
         [
@@ -103,7 +117,7 @@ async def mostrar_bienvenida_o_cerrado(update: Update, context: ContextTypes.DEF
         ],
         [
             InlineKeyboardButton(
-                "🧊 Botellón Nuevo (Con Envase)", callback_data="op_nuevo"
+                "🧊 Botellón Nuevo", callback_data="op_nuevo"
             )
         ],
     ]
@@ -112,7 +126,8 @@ async def mostrar_bienvenida_o_cerrado(update: Update, context: ContextTypes.DEF
     bienvenida = (
         f"¡Hola *{user.first_name}*! 👋\n\n"
         "Bienvenido al sistema de pedidos de la *Potabilizadora Gual España* 💧.\n\n"
-        "Por favor, selecciona el tipo de servicio que necesitas:"
+        "Por favor, selecciona el tipo de servicio que necesitas:\n\n"
+        "💡 *Nota:* Puedes cancelar tu pedido en cualquier momento enviando el comando /cancelar."
     )
     await update.message.reply_text(
         bienvenida, reply_markup=reply_markup, parse_mode="Markdown"
@@ -128,31 +143,49 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     paso = user_data_store[user_id]["paso"]
 
+    # 1. PASO: CANTIDAD
     if paso == "cantidad":
-        if update.message.text:
-            user_data_store[user_id]["cantidad"] = update.message.text
-            user_data_store[user_id]["paso"] = "direccion"
-            
-            teclado_ubicacion = ReplyKeyboardMarkup(
-                [[KeyboardButton("📍 Compartir mi Ubicación Actual", request_location=True)]],
-                resize_keyboard=True,
-                one_time_keyboard=True
-            )
-            
+        texto = update.message.text
+        if not texto or not texto.isdigit() or int(texto) <= 0:
             await update.message.reply_text(
-                "📍 ¡Perfecto!\n\n"
-                "Ahora, por favor presiona el botón de abajo para enviar tu ubicación exacta o escribe una referencia:",
-                reply_markup=teclado_ubicacion,
+                "⚠️ Por favor, ingresa un número válido de unidades (ejemplo: 2).\n"
+                "También puedes cancelar escribiendo /cancelar.",
                 parse_mode="Markdown"
             )
+            return
 
+        cantidad = int(texto)
+        total_a_pagar = cantidad * PRECIO_UNITARIO
+        user_data_store[user_id]["cantidad"] = str(cantidad)
+        user_data_store[user_id]["total"] = total_a_pagar
+        user_data_store[user_id]["paso"] = "direccion"
+            
+        teclado_ubicacion = ReplyKeyboardMarkup(
+            [[KeyboardButton("📍 Compartir mi Ubicación Actual", request_location=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+            
+        await update.message.reply_text(
+            f"🔢 Son {cantidad} unidades, el total a pagar es *{total_a_pagar} Bs*.\n\n"
+            "📍 Ahora, por favor presiona el botón de abajo para enviar tu ubicación exacta o escribe una referencia:\n\n"
+            "*(Recuerda que puedes usar /cancelar para abortar en cualquier momento)*",
+            reply_markup=teclado_ubicacion,
+            parse_mode="Markdown"
+        )
+
+    # 2. PASO: DIRECCIÓN
     elif paso == "direccion":
         if update.message.location:
             lat = update.message.location.latitude
             lon = update.message.location.longitude
-            user_data_store[user_id]["direccion"] = f"Ubicación GPS: [Google Maps](https://maps.google.com/?q={lat},{lon})"
+            user_data_store[user_id]["direccion_texto"] = f"Ubicación GPS: [Google Maps](https://maps.google.com/?q={lat},{lon})"
+            user_data_store[user_id]["lat"] = lat
+            user_data_store[user_id]["lon"] = lon
+            user_data_store[user_id]["tiene_ubicacion_gps"] = True
         elif update.message.text:
-            user_data_store[user_id]["direccion"] = f"Dirección escrita: {update.message.text}"
+            user_data_store[user_id]["direccion_texto"] = f"Dirección escrita: {update.message.text}"
+            user_data_store[user_id]["tiene_ubicacion_gps"] = False
         else:
             return
 
@@ -169,24 +202,42 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "📱 Pago Móvil", callback_data="pago_movil"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    "⚠️ Reportar Pago / Incidencia", callback_data="pago_falso"
-                )
-            ],
         ]
         reply_markup = InlineKeyboardMarkup(teclado_pago)
         
+        total = user_data_store[user_id]["total"]
         await update.message.reply_text(
-            "💳 ¿Cuál será tu *método de pago*?",
+            "💳 ¿Cuál será tu *método de pago*?\n"
+            f"Total a cancelar: *{total} Bs*",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="Markdown"
         )
         await update.message.reply_text(
-            "Selecciona una opción:",
+            "Selecciona una opción o escribe /cancelar si deseas anular el pedido:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
+
+    # 3. PASO: ESPERANDO FOTO DE COMPROBANTE DE PAGO MÓVIL
+    elif paso == "esperando_capture":
+        if update.message.photo:
+            foto_file_id = update.message.photo[-1].file_id
+            user_data_store[user_id]["capture_id"] = foto_file_id
+            
+            # Enviar pedido completo al grupo con la foto
+            await enviar_pedido_con_foto_al_grupo(user_id, context)
+            
+            await update.message.reply_text(
+                "✅ *¡Comprobante recibido y pedido enviado con éxito!*\n\n"
+                "La administración verificará tu pago en breve. ¡Gracias por preferirnos! 💧✨",
+                parse_mode="Markdown"
+            )
+            user_data_store.pop(user_id, None)
+        else:
+            await update.message.reply_text(
+                "⚠️ Por favor, envía la *foto del comprobante (capture)* de tu pago móvil para continuar, o escribe /cancelar para anular.",
+                parse_mode="Markdown"
+            )
 
 
 async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,13 +253,13 @@ async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data_tipo == "op_recarga":
         user_data_store[user_id]["tipo_pedido"] = "Recarga de Botellón"
     elif data_tipo == "op_nuevo":
-        user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo (Con Envase)"
+        user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo"
 
     user_data_store[user_id]["paso"] = "cantidad"
     await query.edit_message_text(
         text=(
             f"📦 Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}*.\n\n"
-            "🔢 ¿Cuántas unidades deseas solicitar?"
+            "🔢 ¿Cuántas unidades deseas solicitar? (Escribe el número en el chat o usa /cancelar):"
         ),
         parse_mode="Markdown",
     )
@@ -224,42 +275,29 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data_pago = query.data
 
-    # 1. Si selecciona Pago Móvil, mostramos los datos bancarios exactos al usuario
+    # 1. Si selecciona Pago Móvil, mostramos datos y pedimos foto del capture
     if data_pago == "pago_movil":
         user_data_store[user_id]["metodo_pago"] = "Pago Móvil"
+        user_data_store[user_id]["paso"] = "esperando_capture"
+        total = user_data_store[user_id].get("total", 0)
         
         datos_pm = (
             "📱 *DATOS PARA PAGO MÓVIL* 📱\n\n"
             f"🏦 *Banco:* {PAGO_MOVIL_BANCO}\n"
             f"📞 *Teléfono:* `{PAGO_MOVIL_TELEFONO}`\n"
-            f"🆔 *Cédula:* `{PAGO_MOVIL_CEDULA}`\n\n"
-            "✨ Realiza tu pago y recuerda notificar o enviar el capture a la administración."
+            f"🆔 *Cédula:* `{PAGO_MOVIL_CEDULA}`\n"
+            f"💰 *Monto exacto:* `{total} Bs`\n\n"
+            "📸 *Por favor, envía por aquí la foto del comprobante (capture) de tu pago* para procesar tu pedido.\n\n"
+            "*(Puedes cancelar enviando /cancelar)*"
         )
-        
-        await enviar_pedido_al_grupo(query, user_id, context, "Pago Móvil")
         
         await query.edit_message_text(text=datos_pm, parse_mode="Markdown")
-        user_data_store.pop(user_id, None)
         return
 
-    # 2. Si selecciona Reporte de Pago / Incidencia
-    if data_pago == "pago_falso":
-        await query.edit_message_text(
-            text=(
-                "🚨 *¡Atención!* 🚨\n\n"
-                "Se ha detectado un inconveniente o reporte con el pago.\n"
-                "Por favor, comunícate directamente con la administradora para verificar tu situación.\n\n"
-                f"📞 *Administradora:* `{TELEFONO_ADMIN}`"
-            ),
-            parse_mode="Markdown"
-        )
-        user_data_store.pop(user_id, None)
-        return
-
-    # 3. Si selecciona Efectivo
+    # 2. Si selecciona Efectivo
     if data_pago == "pago_efectivo":
         user_data_store[user_id]["metodo_pago"] = "Efectivo"
-        await enviar_pedido_al_grupo(query, user_id, context, "Efectivo")
+        await enviar_pedido_texto_al_grupo(user_id, context, "Efectivo")
         
         await query.edit_message_text(
             text=(
@@ -272,41 +310,65 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-async def enviar_pedido_al_grupo(query, user_id, context, metodo):
+def obtener_teclado_admin(user_id):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💳 Pago Verificado", callback_data=f"verificado_{user_id}"),
+            InlineKeyboardButton("⚠️ Pago Falsificado", callback_data=f"pagofalso_{user_id}")
+        ],
+        [
+            InlineKeyboardButton("🛵 En camino", callback_data=f"encamino_{user_id}"),
+            InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{user_id}")
+        ]
+    ])
+
+
+async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
     datos = user_data_store.get(user_id, {})
     tipo = datos.get("tipo_pedido", "Pedido")
     cantidad = datos.get("cantidad", "1")
-    direccion = datos.get("direccion", "Sin dirección")
+    total = datos.get("total", 0)
+    direccion = datos.get("direccion_texto", "Sin dirección")
 
     mensaje_grupo = (
         f"🚨 *¡NUEVO PEDIDO RECIBIDO!* 🚨\n\n"
-        f"👤 *Cliente:* {query.from_user.full_name}\n"
+        f"👤 *Cliente:* <a href=\"tg://user?id={user_id}\">Cliente</a>\n"
         f"📦 *Producto:* {tipo}\n"
-        f"🔢 *Cantidad:* {cantidad}\n"
+        f"🔢 *Cantidad:* {cantidad} (Total: {total} Bs)\n"
         f"📍 *Entrega:* {direccion}\n"
         f"💵 *Método de pago:* {metodo}\n"
-        f"📌 *Estado:* 🟡 Pendiente por verificación"
+        f"📌 *Estado:* 🟡 Pendiente"
     )
 
-    teclado_admin = [
-        [
-            InlineKeyboardButton(
-                "💳 Pago Verificado", callback_data=f"verificado_{user_id}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🛵 En camino", callback_data=f"encamino_{user_id}"
-            ),
-            InlineKeyboardButton(
-                "✅ Entregado", callback_data=f"entregado_{user_id}"
-            ),
-        ],
-    ]
-    reply_markup = InlineKeyboardMarkup(teclado_admin)
-
     await context.bot.send_message(
-        chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=reply_markup, parse_mode="Markdown", disable_web_page_preview=False
+        chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=obtener_teclado_admin(user_id), parse_mode="HTML", disable_web_page_preview=False
+    )
+
+
+async def enviar_pedido_con_foto_al_grupo(user_id, context):
+    datos = user_data_store.get(user_id, {})
+    tipo = datos.get("tipo_pedido", "Pedido")
+    cantidad = datos.get("cantidad", "1")
+    total = datos.get("total", 0)
+    direccion = datos.get("direccion_texto", "Sin dirección")
+    capture_id = datos.get("capture_id")
+
+    caption_grupo = (
+        f"🚨 *¡NUEVO PEDIDO CON PAGO MÓVIL!* 🚨\n\n"
+        f"👤 *Cliente:* <a href=\"tg://user?id={user_id}\">Cliente</a>\n"
+        f"📦 *Producto:* {tipo}\n"
+        f"🔢 *Cantidad:* {cantidad} (Monto: {total} Bs)\n"
+        f"📍 *Entrega:* {direccion}\n"
+        f"💵 *Método de pago:* Pago Móvil\n"
+        f"📌 *Estado:* 🟡 Pendiente por verificación de pago"
+    )
+
+    await context.bot.send_photo(
+        chat_id=GRUPO_ID,
+        photo=capture_id,
+        caption=caption_grupo,
+        reply_markup=obtener_teclado_admin(user_id),
+        parse_mode="HTML"
     )
 
 
@@ -326,20 +388,53 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
         await context.bot.send_message(
             chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
         )
-        await query.edit_message_reply_markup(
-            reply_markup=InlineKeyboardMarkup(
+        
+        try:
+            nuevo_teclado = InlineKeyboardMarkup([
                 [
-                    [
-                        InlineKeyboardButton(
-                            "🛵 En camino", callback_data=f"encamino_{cliente_id}"
-                        ),
-                        InlineKeyboardButton(
-                            "✅ Entregado", callback_data=f"entregado_{cliente_id}"
-                        ),
-                    ]
+                    InlineKeyboardButton("🛵 En camino", callback_data=f"encamino_{cliente_id}"),
+                    InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{cliente_id}")
                 ]
-            )
+            ])
+            if query.message.photo:
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n✅ *PAGO VERIFICADO*",
+                    reply_markup=nuevo_teclado,
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    text=query.message.text + "\n\n✅ *PAGO VERIFICADO*",
+                    reply_markup=nuevo_teclado,
+                    parse_mode="Markdown"
+                )
+        except Exception:
+            pass
+
+    elif accion == "pagofalso":
+        mensaje_cliente = (
+            "🚨 *¡ATENCIÓN: PAGO NO VÁLIDO / FALSO!* 🚨\n\n"
+            "Lamentablemente, el comprobante o pago enviado no pudo ser verificado o presenta inconsistencias.\n\n"
+            "Por favor, comunícate directamente con la administración para solventar la situación a través del siguiente número:\n\n"
+            f"📞 *Administradora:* `{TELEFONO_ADMIN}`"
         )
+        await context.bot.send_message(
+            chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
+        )
+        
+        try:
+            if query.message.photo:
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n❌ *PAGO RECHAZADO (FALSO)*",
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    text=query.message.text + "\n\n❌ *PAGO RECHAZADO (FALSO)*",
+                    parse_mode="Markdown"
+                )
+        except Exception:
+            pass
 
     elif accion == "encamino":
         mensaje_cliente = (
@@ -358,10 +453,19 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
         await context.bot.send_message(
             chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
         )
-        await query.edit_message_text(
-            text=query.message.text + "\n\n✅ *PEDIDO COMPLETADO*",
-            parse_mode="Markdown",
-        )
+        try:
+            if query.message.photo:
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n✅ *PEDIDO COMPLETADO*",
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    text=query.message.text + "\n\n✅ *PEDIDO COMPLETADO*",
+                    parse_mode="Markdown"
+                )
+        except Exception:
+            pass
 
 
 def main():
@@ -371,17 +475,18 @@ def main():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", mostrar_bienvenida_o_cerrado))
+    application.add_handler(CommandHandler("cancelar", cancelar_pedido))
     application.add_handler(CallbackQueryHandler(callback_eleccion, pattern="^op_.*"))
-    application.add_handler(CallbackQueryHandler(callback_pago, pattern="^(pago_.*|pago_falso)$"))
+    application.add_handler(CallbackQueryHandler(callback_pago, pattern="^pago_.*"))
     application.add_handler(
         CallbackQueryHandler(
             callback_acciones_admin,
-            pattern="^(verificado|encamino|entregado)_.*",
+            pattern="^(verificado|pagofalso|encamino|entregado)_.*",
         )
     )
-    application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, manejar_mensajes))
+    application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot completo configurado con tus datos reales de Pago Móvil...")
+    print("Bot actualizado con el botón de pago falso y el nuevo número de la administradora...")
     application.run_polling()
 
 
