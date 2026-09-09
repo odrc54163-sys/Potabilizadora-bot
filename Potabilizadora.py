@@ -35,7 +35,7 @@ GRUPO_ID = -1004303277305
 # 📌 TUS DATOS REALES DE PAGO MÓVIL Y ADMINISTRACIÓN
 TELEFONO_ADMIN = "0412-9511145"
 PAGO_MOVIL_BANCO = "Banco Venezuela"
-PAGO_MOVIL_TELEFONO = "0412-9513015"
+PAGO_MOVIL_TELEFONO = "0412-3953015"
 PAGO_MOVIL_CEDULA = "18.912.986"
 
 # PRECIO UNITARIO
@@ -43,6 +43,26 @@ PRECIO_UNITARIO = 800
 
 # Almacenamiento temporal de datos de los usuarios en memoria
 user_data_store = {}
+
+
+# --- FUNCIÓN PARA FORMATEAR EL NÉMERO DE TELÉFONO A VENEZUELA ---
+def formatear_telefono(tel_str):
+    # Eliminar espacios, símbolos más o guiones
+    limpio = "".join(filter(str.isdigit, str(tel_str)))
+    
+    # Si empieza por 58 y tiene 12 dígitos (ej: 584129511145)
+    if limpio.startswith("58") and len(limpio) == 12:
+        limpio = limpio[2:] # Quitamos el 58 -> queda 4129511145
+        
+    # Si tiene 10 dígitos (ej: 4129511145)
+    if len(limpio) == 10:
+        return f"{limpio[:4]}-{limpio[4:]}"
+        
+    # Si viene con un 0 adelante y 11 dígitos (ej: 04129511145)
+    if len(limpio) == 11 and limpio.startswith("0"):
+        return f"{limpio[:4]}-{limpio[4:]}"
+        
+    return tel_str  # Si no coincide con nada estándar, lo devuelve tal cual
 
 
 # --- SERVIDOR WEB FALSO PARA RENDER Y UPTIMEROBOT ---
@@ -196,13 +216,13 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 3. PASO: TELÉFONO
     elif paso == "telefono":
         if update.message.contact:
-            telefono = update.message.contact.phone_number
+            telefono_crudo = update.message.contact.phone_number
         elif update.message.text:
-            telefono = update.message.text.strip()
+            telefono_crudo = update.message.text.strip()
         else:
             return
 
-        user_data_store[user_id]["telefono_cliente"] = telefono
+        user_data_store[user_id]["telefono_cliente"] = formatear_telefono(telefono_crudo)
         user_data_store[user_id]["paso"] = "direccion"
 
         teclado_ubicacion = ReplyKeyboardMarkup(
@@ -390,7 +410,7 @@ async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
         f"📌 *Estado:* ⏳ Pendiente"
     )
 
-    sent_msg = await context.bot.send_message(
+    await context.bot.send_message(
         chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=obtener_teclado_admin(user_id), parse_mode="Markdown"
     )
 
@@ -571,7 +591,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado con los nuevos campos de nombre, teléfono, ubicación en mapa y formato mejorado...")
+    print("Bot actualizado: formateo de teléfono optimizado...")
     application.run_polling()
 
 
