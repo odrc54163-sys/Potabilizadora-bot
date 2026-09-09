@@ -35,7 +35,7 @@ GRUPO_ID = -1004303277305
 # 📌 TUS DATOS REALES DE PAGO MÓVIL Y ADMINISTRACIÓN
 TELEFONO_ADMIN = "0412-9511145"
 PAGO_MOVIL_BANCO = "Banco Venezuela"
-PAGO_MOVIL_TELEFONO = "0412-3953015"
+PAGO_MOVIL_TELEFONO = "0412-9513015"
 PAGO_MOVIL_CEDULA = "18.912.986"
 
 # PRECIO UNITARIO
@@ -45,24 +45,20 @@ PRECIO_UNITARIO = 800
 user_data_store = {}
 
 
-# --- FUNCIÓN PARA FORMATEAR EL NÉMERO DE TELÉFONO A VENEZUELA ---
+# --- FUNCIÓN PARA FORMATEAR EL NÚMERO DE TELÉFONO A VENEZUELA ---
 def formatear_telefono(tel_str):
-    # Eliminar espacios, símbolos más o guiones
     limpio = "".join(filter(str.isdigit, str(tel_str)))
     
-    # Si empieza por 58 y tiene 12 dígitos (ej: 584129511145)
     if limpio.startswith("58") and len(limpio) == 12:
-        limpio = limpio[2:] # Quitamos el 58 -> queda 4129511145
+        limpio = limpio[2:] 
         
-    # Si tiene 10 dígitos (ej: 4129511145)
     if len(limpio) == 10:
         return f"{limpio[:4]}-{limpio[4:]}"
         
-    # Si viene con un 0 adelante y 11 dígitos (ej: 04129511145)
     if len(limpio) == 11 and limpio.startswith("0"):
         return f"{limpio[:4]}-{limpio[4:]}"
         
-    return tel_str  # Si no coincide con nada estándar, lo devuelve tal cual
+    return tel_str
 
 
 # --- SERVIDOR WEB FALSO PARA RENDER Y UPTIMEROBOT ---
@@ -287,7 +283,6 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             foto_file_id = update.message.photo[-1].file_id
             user_data_store[user_id]["capture_id"] = foto_file_id
             
-            # Enviar pedido completo al grupo con la foto y ubicación si la hay
             await enviar_pedido_con_foto_al_grupo(user_id, context)
             
             await update.message.reply_text(
@@ -339,7 +334,7 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data_pago = query.data
 
-    # 1. Si selecciona Pago Móvil, mostramos datos y pedimos foto del capture
+    # 1. Si selecciona Pago Móvil
     if data_pago == "pago_movil":
         user_data_store[user_id]["metodo_pago"] = "Pago Móvil"
         user_data_store[user_id]["paso"] = "esperando_capture"
@@ -361,26 +356,36 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. Si selecciona Efectivo
     if data_pago == "pago_efectivo":
         user_data_store[user_id]["metodo_pago"] = "Efectivo"
+        
+        # Enviamos el pedido al grupo usando el teclado exclusivo de efectivo (solo En camino y Entregado)
         await enviar_pedido_texto_al_grupo(user_id, context, "Efectivo")
         
+        # Limpiamos los botones de selección del cliente y le mostramos el texto limpio
         await query.edit_message_text(
-            text=(
-                "🎉 *¡Pedido registrado con éxito!*\n\n"
-                "💵 Has seleccionado pago en *Efectivo* al recibir. ¡Pronto despacharemos tu pedido! 🚚💧"
-            ),
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardRemove()
+            text="✅ Su pedido fue tomado en cuenta y ya está en proceso.",
+            parse_mode="Markdown"
         )
+        
+        # Borramos los datos temporales del usuario
         user_data_store.pop(user_id, None)
         return
 
 
-def obtener_teclado_admin(user_id):
+def obtener_teclado_admin_pago_movil(user_id):
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("💳 Pago Verificado", callback_data=f"verificado_{user_id}"),
             InlineKeyboardButton("⚠️ Pago Falso", callback_data=f"pagofalso_{user_id}")
         ],
+        [
+            InlineKeyboardButton("🛵 En camino", callback_data=f"encamino_{user_id}"),
+            InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{user_id}")
+        ]
+    ])
+
+
+def obtener_teclado_admin_efectivo(user_id):
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🛵 En camino", callback_data=f"encamino_{user_id}"),
             InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{user_id}")
@@ -407,14 +412,14 @@ async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
         f"📦 *Pedido:* {cantidad}x {tipo}\n"
         f"💵 *Total a pagar:* {total:,.2f} BS\n"
         f"💳 *Método de pago:* {metodo}\n\n"
-        f"📌 *Estado:* ⏳ Pendiente"
+        f"📌 *Estado:* ⏳ Pedido en efectivo (Pendiente de entrega)"
     )
 
+    # Como es efectivo, mandamos el teclado que SOLO tiene En camino y Entregado
     await context.bot.send_message(
-        chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=obtener_teclado_admin(user_id), parse_mode="Markdown"
+        chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=obtener_teclado_admin_efectivo(user_id), parse_mode="Markdown"
     )
 
-    # Enviar ubicación si la tiene guardada
     if datos.get("tiene_ubicacion_gps"):
         await context.bot.send_location(
             chat_id=GRUPO_ID,
@@ -453,15 +458,15 @@ async def enviar_pedido_con_foto_al_grupo(user_id, context):
         f"📌 *Estado:* ⏳ Pendiente por verificar pago"
     )
 
+    # Como es pago móvil, mandamos el teclado completo con opciones de verificación
     await context.bot.send_photo(
         chat_id=GRUPO_ID,
         photo=capture_id,
         caption=caption_grupo,
-        reply_markup=obtener_teclado_admin(user_id),
+        reply_markup=obtener_teclado_admin_pago_movil(user_id),
         parse_mode="Markdown"
     )
 
-    # Enviar ubicación si la tiene guardada
     if datos.get("tiene_ubicacion_gps"):
         await context.bot.send_location(
             chat_id=GRUPO_ID,
@@ -591,7 +596,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado: formateo de teléfono optimizado...")
+    print("Bot actualizado correctamente con botones separados para efectivo y pago móvil...")
     application.run_polling()
 
 
