@@ -44,8 +44,19 @@ PRECIO_UNITARIO = 800
 # Almacenamiento temporal de datos de los usuarios en memoria
 user_data_store = {}
 
+# Almacenamiento para las estadísticas del día
+estadisticas_dia = {
+    "pedidos": []
+}
 
-# --- FUNCIÓN PARA FORMATEAR EL NÚMERO DE TELÉFONO A VENEZUELA ---
+
+# --- FUNCIONES DE HORA Y FORMATO ---
+def obtener_hora_venezuela_12h():
+    tz = pytz.timezone("America/Caracas")
+    ahora = datetime.now(tz)
+    return ahora.strftime("%I:%M %p")
+
+
 def formatear_telefono(tel_str):
     limpio = "".join(filter(str.isdigit, str(tel_str)))
     
@@ -92,6 +103,36 @@ def verificar_horario():
     hora_fin = datetime.strptime("17:30", "%H:%M").time()
 
     return hora_inicio <= hora_actual <= hora_fin
+
+
+# --- TAREAS AUTOMÁTICAS (JOB QUEUE) ---
+async def enviar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
+    total_viajes = len(estadisticas_dia["pedidos"])
+    dinero_total = sum(p["total"] for p in estadisticas_dia["pedidos"])
+    
+    mensaje = (
+        "📊 *ESTADÍSTICAS DEL DÍA (6:30 PM)* 📊\n\n"
+        f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
+        f"💵 *Dinero total recaudado:* {dinero_total:,.2f} BS\n\n"
+        "🕒 *Detalle de los viajes realizados:*\n"
+    )
+    
+    if total_viajes == 0:
+        mensaje += "*(No se registraron pedidos el día de hoy)*"
+    else:
+        for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
+            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{p['total']} Bs* - ⏰ {p['hora']}\n"
+
+    await context.bot.send_message(
+        chat_id=GRUPO_ID,
+        text=mensaje,
+        parse_mode="Markdown"
+    )
+
+
+async def reiniciar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
+    estadisticas_dia["pedidos"] = []
+    logger.log(logging.INFO, "Estadísticas reiniciadas automáticamente a las 9:00 PM.")
 
 
 async def cancelar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -283,6 +324,15 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             foto_file_id = update.message.photo[-1].file_id
             user_data_store[user_id]["capture_id"] = foto_file_id
             
+            # Registramos el pedido en las estadísticas del día al completarse
+            datos_usr = user_data_store[user_id]
+            estadisticas_dia["pedidos"].append({
+                "tipo": f"{datos_usr.get('tipo_pedido')} ({datos_usr.get('nombre_cliente')})",
+                "cantidad": datos_usr.get("cantidad"),
+                "total": datos_usr.get("total"),
+                "hora": obtener_hora_venezuela_12h()
+            })
+            
             await enviar_pedido_con_foto_al_grupo(user_id, context)
             
             await update.message.reply_text(
@@ -357,16 +407,23 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data_pago == "pago_efectivo":
         user_data_store[user_id]["metodo_pago"] = "Efectivo"
         
-        # Enviamos el pedido al grupo usando el teclado exclusivo de efectivo (solo En camino y Entregado)
+        # Registramos el pedido en las estadísticas del día
+        datos_usr = user_data_store[user_id]
+        estadisticas_dia["pedidos"].append({
+            "tipo": f"{datos_usr.get('tipo_pedido')} ({datos_usr.get('nombre_cliente')})",
+            "cantidad": datos_usr.get("cantidad"),
+            "total": datos_usr.get("total"),
+            "hora": obtener_hora_venezuela_12h()
+        })
+        
+        # Enviamos el pedido al grupo usando el teclado exclusivo de efectivo
         await enviar_pedido_texto_al_grupo(user_id, context, "Efectivo")
         
-        # Limpiamos los botones de selección del cliente y le mostramos el texto limpio
         await query.edit_message_text(
             text="✅ Su pedido fue tomado en cuenta y ya está en proceso.",
             parse_mode="Markdown"
         )
         
-        # Borramos los datos temporales del usuario
         user_data_store.pop(user_id, None)
         return
 
@@ -415,7 +472,6 @@ async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
         f"📌 *Estado:* ⏳ Pedido en efectivo (Pendiente de entrega)"
     )
 
-    # Como es efectivo, mandamos el teclado que SOLO tiene En camino y Entregado
     await context.bot.send_message(
         chat_id=GRUPO_ID, text=mensaje_grupo, reply_markup=obtener_teclado_admin_efectivo(user_id), parse_mode="Markdown"
     )
@@ -458,7 +514,6 @@ async def enviar_pedido_con_foto_al_grupo(user_id, context):
         f"📌 *Estado:* ⏳ Pendiente por verificar pago"
     )
 
-    # Como es pago móvil, mandamos el teclado completo con opciones de verificación
     await context.bot.send_photo(
         chat_id=GRUPO_ID,
         photo=capture_id,
@@ -578,14 +633,53 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
             pass
 
 
+async def comando_estadisticas_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total_viajes = len(estadisticas_dia["pedidos"])
+    dinero_total = sum(p["total"] for p in estadisticas_dia["pedidos"])
+    
+    mensaje = (
+        "📊 *ESTADÍSTICAS DEL DÍA (Solicitadas)* 📊\n\n"
+        f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
+        f"💵 *Dinero total recaudado:* {dinero_total:,.2f} BS\n\n"
+        "🕒 *Detalle de los viajes realizados:*\n"
+    )
+    
+    if total_viajes == 0:
+        mensaje += "*(No se registraron pedidos todavía)*"
+    else:
+        for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
+            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{p['total']} Bs* - ⏰ {p['hora']}\n"
+
+    await update.message.reply_text(mensaje, parse_mode="Markdown")
+
+
 def main():
     hilo_web = threading.Thread(target=iniciar_servidor_web, daemon=True)
     hilo_web.start()
 
     application = Application.builder().token(TOKEN).build()
 
+    # Configuración de la zona horaria de Venezuela para las tareas automáticas
+    zona_venezuela = pytz.timezone("America/Caracas")
+
+    # Configuramos el JobQueue para las horas exactas en Venezuela
+    job_queue = application.job_queue
+    
+    # 6:30 PM = 18:30
+    job_queue.run_daily(
+        enviar_estadisticas_automaticas,
+        time=datetime.strptime("18:30", "%H:%M").time().replace(tzinfo=zona_venezuela)
+    )
+    
+    # 9:00 PM = 21:00 (Reinicio automático)
+    job_queue.run_daily(
+        reiniciar_estadisticas_automaticas,
+        time=datetime.strptime("21:00", "%H:%M").time().replace(tzinfo=zona_venezuela)
+    )
+
     application.add_handler(CommandHandler("start", mostrar_bienvenida_o_cerrado))
     application.add_handler(CommandHandler("cancelar", cancelar_pedido))
+    application.add_handler(CommandHandler("estadisticas", comando_estadisticas_manual))
     application.add_handler(CallbackQueryHandler(callback_eleccion, pattern="^op_.*"))
     application.add_handler(CallbackQueryHandler(callback_pago, pattern="^pago_.*"))
     application.add_handler(
@@ -596,9 +690,10 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado correctamente con botones separados para efectivo y pago móvil...")
+    print("Bot actualizado con estadísticas automáticas a las 6:30 PM, reinicio a las 9:00 PM y hora en formato 12h...")
     application.run_polling()
 
 
 if __name__ == "__main__":
+name = "main"
     main()
