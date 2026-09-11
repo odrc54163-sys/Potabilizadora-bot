@@ -70,7 +70,6 @@ def formatear_telefono(tel_str):
     if len(limpio) == 11 and limpio.startswith("0"):
         return f"{limpio[:4]}-{limpio[4:]}"
         
-    # Si viene sin el 0 inicial pero con 7 dígitos después del operador (ej: 4129511145 -> 0412-9511145)
     if len(limpio) == 10:
         return f"0{limpio[:3]}-{limpio[3:]}"
 
@@ -605,7 +604,7 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
                     parse_mode="Markdown"
                 )
             else:
-                await query.edit_center_text(
+                await query.edit_message_text(
                     text=query.message.text + "\n\n❌ *PAGO RECHAZADO (FALSO)*",
                     parse_mode="Markdown"
                 )
@@ -683,7 +682,7 @@ def main():
     )
     
     # 9:00 PM = 21:00 (Reinicio automático)
-    job_queue.run_dia = job_queue.run_daily(
+    job_queue.run_daily(
         reiniciar_estadisticas_automaticas,
         time=datetime.strptime("21:00", "%H:%M").time().replace(tzinfo=zona_venezuela)
     )
@@ -701,7 +700,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado con formato de teléfono limpio y ordenado...")
+    print("Bot actualizado correctamente y listo para funcionar...")
     application.run_polling()
 
 
