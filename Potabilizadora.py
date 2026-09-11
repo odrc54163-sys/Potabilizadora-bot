@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # CONFIGURACIÓN DE CREDENCIALES
-TOKEN = "8925935497:AAEGyl40GCpChO-zBCArrSNLioD5dOUNKfY"
+TOKEN = "8925935497:AAEa-7XaJNocYfUP9ZaXcq60atl2ystV7T4"
 GRUPO_ID = -1004303277305
 
 # 📌 TUS DATOS REALES DE PAGO MÓVIL Y ADMINISTRACIÓN
@@ -76,6 +76,14 @@ def formatear_telefono(tel_str):
     return tel_str
 
 
+def formatear_monto(monto):
+    """Convierte un número a entero con puntos como separadores de miles (ej: 8000 -> 8.000)"""
+    try:
+        return f"{int(monto):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(monto)
+
+
 # --- SERVIDOR WEB FALSO PARA RENDER Y UPTIMEROBOT ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -117,7 +125,7 @@ async def enviar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
     mensaje = (
         "📊 *ESTADÍSTICAS DEL DÍA (6:30 PM)* 📊\n\n"
         f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
-        f"💵 *Dinero total recaudado:* {dinero_total:,.2f} BS\n\n"
+        f"💵 *Dinero total recaudado:* {formatear_monto(dinero_total)} BS\n\n"
         "🕒 *Detalle de los viajes realizados:*\n"
     )
     
@@ -125,7 +133,8 @@ async def enviar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
         mensaje += "*(No se registraron pedidos el día de hoy)*"
     else:
         for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
-            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{p['total']} Bs* - ⏰ {p['hora']}\n"
+            monto_formateado = formatear_monto(p['total'])
+            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{monto_formateado} Bs* - ⏰ {p['hora']}\n"
 
     await context.bot.send_message(
         chat_id=GRUPO_ID,
@@ -224,7 +233,7 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_store[user_id]["paso"] = "nombre"
             
         await update.message.reply_text(
-            f"🔢 Son {cantidad} unidades, el total a pagar es *{total_a_pagar} Bs*.\n\n"
+            f"🔢 Son {cantidad} unidades, el total a pagar es *{formatear_monto(total_a_pagar)} Bs*.\n\n"
             "👤 Por favor, dime tu *Nombre y Apellido* para registrar el pedido:\n\n"
             "*(Recuerda que puedes usar /cancelar para abortar en cualquier momento)*",
             reply_markup=ReplyKeyboardRemove(),
@@ -314,7 +323,7 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = user_data_store[user_id]["total"]
         await update.message.reply_text(
             "💳 ¿Cuál será tu *método de pago*?\n"
-            f"Total a cancelar: *{total} Bs*",
+            f"Total a cancelar: *{formatear_monto(total)} Bs*",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="Markdown"
         )
@@ -368,11 +377,11 @@ async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data_tipo == "op_recarga":
         user_data_store[user_id]["tipo_pedido"] = "Recarga"
         user_data_store[user_id]["precio_unitario"] = PRECIO_RECARGA
-        precio_texto = f"{PRECIO_RECARGA} Bs c/u"
+        precio_texto = f"{formatear_monto(PRECIO_RECARGA)} Bs c/u"
     elif data_tipo == "op_nuevo":
         user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo"
         user_data_store[user_id]["precio_unitario"] = PRECIO_NUEVO
-        precio_texto = f"{PRECIO_NUEVO} Bs c/u"
+        precio_texto = f"{formatear_monto(PRECIO_NUEVO)} Bs c/u"
 
     user_data_store[user_id]["paso"] = "cantidad"
     await query.edit_message_text(
@@ -405,7 +414,7 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏦 *Banco:* {PAGO_MOVIL_BANCO}\n"
             f"📞 *Teléfono:* `{PAGO_MOVIL_TELEFONO}`\n"
             f"🆔 *Cédula:* `{PAGO_MOVIL_CEDULA}`\n"
-            f"💰 *Monto exacto:* `{total} Bs`\n\n"
+            f"💰 *Monto exacto:* `{formatear_monto(total)} Bs`\n\n"
             "📸 *Por favor, envía por aquí la foto del comprobante (capture) de tu pago* para procesar tu pedido.\n\n"
             "*(Puedes cancelar enviando /cancelar)*"
         )
@@ -477,7 +486,7 @@ async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
         f"💬 *Alias:* {alias}\n"
         f"📞 *Teléfono:* `{telefono}`\n"
         f"📦 *Pedido:* {cantidad}x {tipo}\n"
-        f"💵 *Total a pagar:* {total:,.2f} BS\n"
+        f"💵 *Total a pagar:* {formatear_monto(total)} BS\n"
         f"💳 *Método de pago:* {metodo}\n\n"
         f"📌 *Estado:* ⏳ Pedido en efectivo (Pendiente de entrega)"
     )
@@ -519,7 +528,7 @@ async def enviar_pedido_con_foto_al_grupo(user_id, context):
         f"💬 *Alias:* {alias}\n"
         f"📞 *Teléfono:* `{telefono}`\n"
         f"📦 *Pedido:* {cantidad}x {tipo}\n"
-        f"💵 *Total a pagar:* {total:,.2f} BS\n"
+        f"💵 *Total a pagar:* {formatear_monto(total)} BS\n"
         f"💳 *Método de pago:* Pago Móvil\n\n"
         f"📌 *Estado:* ⏳ Pendiente por verificar pago"
     )
@@ -650,7 +659,7 @@ async def comando_estadisticas_manual(update: Update, context: ContextTypes.DEFA
     mensaje = (
         "📊 *ESTADÍSTICAS DEL DÍA (Solicitadas)* 📊\n\n"
         f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
-        f"💵 *Dinero total recaudado:* {dinero_total:,.2f} BS\n\n"
+        f"💵 *Dinero total recaudado:* {formatear_monto(dinero_total)} BS\n\n"
         "🕒 *Detalle de los viajes realizados:*\n"
     )
     
@@ -658,7 +667,8 @@ async def comando_estadisticas_manual(update: Update, context: ContextTypes.DEFA
         mensaje += "*(No se registraron pedidos todavía)*"
     else:
         for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
-            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{p['total']} Bs* - ⏰ {p['hora']}\n"
+            monto_formateado = formatear_monto(p['total'])
+            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{monto_formateado} Bs* - ⏰ {p['hora']}\n"
 
     await update.message.reply_text(mensaje, parse_mode="Markdown")
 
