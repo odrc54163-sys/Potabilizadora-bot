@@ -38,8 +38,9 @@ PAGO_MOVIL_BANCO = "Banco Venezuela"
 PAGO_MOVIL_TELEFONO = "0412-9513015"
 PAGO_MOVIL_CEDULA = "18.912.986"
 
-# PRECIO UNITARIO
-PRECIO_UNITARIO = 800
+# PRECIOS UNITARIOS DIFERENCIADOS
+PRECIO_RECARGA = 800
+PRECIO_NUEVO = 4000
 
 # Almacenamiento temporal de datos de los usuarios en memoria
 user_data_store = {}
@@ -69,6 +70,10 @@ def formatear_telefono(tel_str):
     if len(limpio) == 11 and limpio.startswith("0"):
         return f"{limpio[:4]}-{limpio[4:]}"
         
+    # Si viene sin el 0 inicial pero con 7 dígitos después del operador (ej: 4129511145 -> 0412-9511145)
+    if len(limpio) == 10:
+        return f"0{limpio[:3]}-{limpio[3:]}"
+
     return tel_str
 
 
@@ -212,7 +217,9 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         cantidad = int(texto)
-        total_a_pagar = cantidad * PRECIO_UNITARIO
+        precio_unit = user_data_store[user_id]["precio_unitario"]
+        total_a_pagar = cantidad * precio_unit
+        
         user_data_store[user_id]["cantidad"] = str(cantidad)
         user_data_store[user_id]["total"] = total_a_pagar
         user_data_store[user_id]["paso"] = "nombre"
@@ -361,13 +368,17 @@ async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data_tipo == "op_recarga":
         user_data_store[user_id]["tipo_pedido"] = "Recarga"
+        user_data_store[user_id]["precio_unitario"] = PRECIO_RECARGA
+        precio_texto = f"{PRECIO_RECARGA} Bs c/u"
     elif data_tipo == "op_nuevo":
         user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo"
+        user_data_store[user_id]["precio_unitario"] = PRECIO_NUEVO
+        precio_texto = f"{PRECIO_NUEVO} Bs c/u"
 
     user_data_store[user_id]["paso"] = "cantidad"
     await query.edit_message_text(
         text=(
-            f"📦 Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}*.\n\n"
+            f"📦 Has seleccionado: *{user_data_store[user_id]['tipo_pedido']}* (Precio: *{precio_texto}*).\n\n"
             "🔢 ¿Cuántas unidades deseas solicitar? (Escribe el número en el chat o usa /cancelar):"
         ),
         parse_mode="Markdown",
@@ -453,7 +464,7 @@ def obtener_teclado_admin_efectivo(user_id):
 async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
     datos = user_data_store.get(user_id, {})
     nombre = datos.get("nombre_cliente", "Sin nombre")
-    telefono = datos.get("telefono_cliente", "Sin teléfono")
+    telefono = formatear_telefono(datos.get("telefono_cliente", "Sin teléfono"))
     tipo = datos.get("tipo_pedido", "Pedido")
     cantidad = datos.get("cantidad", "1")
     total = datos.get("total", 0)
@@ -494,7 +505,7 @@ async def enviar_pedido_texto_al_grupo(user_id, context, metodo):
 async def enviar_pedido_con_foto_al_grupo(user_id, context):
     datos = user_data_store.get(user_id, {})
     nombre = datos.get("nombre_cliente", "Sin nombre")
-    telefono = datos.get("telefono_cliente", "Sin teléfono")
+    telefono = formatear_telefono(datos.get("telefono_cliente", "Sin teléfono"))
     tipo = datos.get("tipo_pedido", "Pedido")
     cantidad = datos.get("cantidad", "1")
     total = datos.get("total", 0)
@@ -594,7 +605,7 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
                     parse_mode="Markdown"
                 )
             else:
-                await query.edit_message_text(
+                await query.edit_center_text(
                     text=query.message.text + "\n\n❌ *PAGO RECHAZADO (FALSO)*",
                     parse_mode="Markdown"
                 )
@@ -672,7 +683,7 @@ def main():
     )
     
     # 9:00 PM = 21:00 (Reinicio automático)
-    job_queue.run_daily(
+    job_queue.run_dia = job_queue.run_daily(
         reiniciar_estadisticas_automaticas,
         time=datetime.strptime("21:00", "%H:%M").time().replace(tzinfo=zona_venezuela)
     )
@@ -690,7 +701,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado con estadísticas automáticas a las 6:30 PM, reinicio a las 9:00 PM y hora en formato 12h...")
+    print("Bot actualizado con formato de teléfono limpio y ordenado...")
     application.run_polling()
 
 
