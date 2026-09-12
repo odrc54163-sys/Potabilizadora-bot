@@ -35,7 +35,7 @@ GRUPO_ID = -1004303277305
 # 📌 TUS DATOS REALES DE PAGO MÓVIL Y ADMINISTRACIÓN
 TELEFONO_ADMIN = "0412-9511145"
 PAGO_MOVIL_BANCO = "Banco Venezuela"
-PAGO_MOVIL_TELEFONO = "0412-9513015"
+PAGO_MOVIL_TELEFONO = "0412-3953015"
 PAGO_MOVIL_CEDULA = "18.912.986"
 
 # PRECIOS UNITARIOS DIFERENCIADOS
@@ -124,9 +124,8 @@ async def enviar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
     
     mensaje = (
         "📊 *ESTADÍSTICAS DEL DÍA (6:30 PM)* 📊\n\n"
-        f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
-        f"💵 *Dinero total recaudado:* {formatear_monto(dinero_total)} BS\n\n"
-        "🕒 *Detalle de los viajes realizados:*\n"
+        f"🛵 *Viajes hechos:* {total_viajes}\n"
+        f"💵 *Total de dinero reunido hoy:* {formatear_monto(dinero_total)} Bs\n\n"
     )
     
     if total_viajes == 0:
@@ -134,7 +133,13 @@ async def enviar_estadisticas_automaticas(context: ContextTypes.DEFAULT_TYPE):
     else:
         for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
             monto_formateado = formatear_monto(p['total'])
-            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{monto_formateado} Bs* - ⏰ {p['hora']}\n"
+            mensaje += (
+                f"*{idx})* 👤 *Nombre:* {p['nombre']}\n"
+                f"   📞 *Número de teléfono:* `{p['telefono']}`\n"
+                f"   📦 *Pedido:* {p['cantidad']}x {p['tipo_pedido']}\n"
+                f"   💵 *Monto:* {monto_formateado} Bs\n"
+                f"   ⏰ *Hora:* {p['hora']}\n\n"
+            )
 
     await context.bot.send_message(
         chat_id=GRUPO_ID,
@@ -339,10 +344,12 @@ async def manejar_mensajes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             foto_file_id = update.message.photo[-1].file_id
             user_data_store[user_id]["capture_id"] = foto_file_id
             
-            # Registramos el pedido en las estadísticas del día al completarse
+            # Registramos el pedido en la lista acumulativa de estadísticas del día
             datos_usr = user_data_store[user_id]
             estadisticas_dia["pedidos"].append({
-                "tipo": f"{datos_usr.get('tipo_pedido')} ({datos_usr.get('nombre_cliente')})",
+                "nombre": datos_usr.get("nombre_cliente"),
+                "telefono": datos_usr.get("telefono_cliente"),
+                "tipo_pedido": datos_usr.get("tipo_pedido"),
                 "cantidad": datos_usr.get("cantidad"),
                 "total": datos_usr.get("total"),
                 "hora": obtener_hora_venezuela_12h()
@@ -375,11 +382,11 @@ async def callback_eleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data_tipo = query.data
 
     if data_tipo == "op_recarga":
-        user_data_store[user_id]["tipo_pedido"] = "Recarga"
+        user_data_store[user_id]["tipo_pedido"] = "Recarga de agua"
         user_data_store[user_id]["precio_unitario"] = PRECIO_RECARGA
         precio_texto = f"{formatear_monto(PRECIO_RECARGA)} Bs c/u"
     elif data_tipo == "op_nuevo":
-        user_data_store[user_id]["tipo_pedido"] = "Botellón Nuevo"
+        user_data_store[user_id]["tipo_pedido"] = "Botellón nuevo de agua"
         user_data_store[user_id]["precio_unitario"] = PRECIO_NUEVO
         precio_texto = f"{formatear_monto(PRECIO_NUEVO)} Bs c/u"
 
@@ -426,16 +433,18 @@ async def callback_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data_pago == "pago_efectivo":
         user_data_store[user_id]["metodo_pago"] = "Efectivo"
         
-        # Registramos el pedido en las estadísticas del día
+        # Registramos el pedido en la lista acumulativa de estadísticas del día
         datos_usr = user_data_store[user_id]
         estadisticas_dia["pedidos"].append({
-            "tipo": f"{datos_usr.get('tipo_pedido')} ({datos_usr.get('nombre_cliente')})",
+            "nombre": datos_usr.get("nombre_cliente"),
+            "telefono": datos_usr.get("telefono_cliente"),
+            "tipo_pedido": datos_usr.get("tipo_pedido"),
             "cantidad": datos_usr.get("cantidad"),
             "total": datos_usr.get("total"),
             "hora": obtener_hora_venezuela_12h()
         })
         
-        # Enviamos el pedido al grupo usando el teclado exclusivo de efectivo
+        # Enviamos el pedido al grupo
         await enviar_pedido_texto_al_grupo(user_id, context, "Efectivo")
         
         await query.edit_message_text(
@@ -623,7 +632,7 @@ async def callback_acciones_admin(update: Update, context: ContextTypes.DEFAULT_
     elif accion == "encamino":
         mensaje_cliente = (
             "🛵 *¡Su pedido va en camino!* 💧\n\n"
-            "El motorizado ya se dirige hacia su ubicación. Por favor, **manténgase atento a su teléfono** y a la puerta. ¡Gracias por su compra! 🚰"
+            "El motorizado ya se dirige hacia su ubicación. Por favor, **manténgase atento al teléfono** y a la puerta. ¡Gracias por su compra! 🚰"
         )
         await context.bot.send_message(
             chat_id=cliente_id, text=mensaje_cliente, parse_mode="Markdown"
@@ -658,9 +667,8 @@ async def comando_estadisticas_manual(update: Update, context: ContextTypes.DEFA
     
     mensaje = (
         "📊 *ESTADÍSTICAS DEL DÍA (Solicitadas)* 📊\n\n"
-        f"📦 *Total de pedidos/viajes:* {total_viajes}\n"
-        f"💵 *Dinero total recaudado:* {formatear_monto(dinero_total)} BS\n\n"
-        "🕒 *Detalle de los viajes realizados:*\n"
+        f"🛵 *Viajes hechos:* {total_viajes}\n"
+        f"💵 *Total de dinero reunido hoy:* {formatear_monto(dinero_total)} Bs\n\n"
     )
     
     if total_viajes == 0:
@@ -668,7 +676,13 @@ async def comando_estadisticas_manual(update: Update, context: ContextTypes.DEFA
     else:
         for idx, p in enumerate(estadisticas_dia["pedidos"], 1):
             monto_formateado = formatear_monto(p['total'])
-            mensaje += f"{idx}. {p['tipo']} ({p['cantidad']} unid.) - *{monto_formateado} Bs* - ⏰ {p['hora']}\n"
+            mensaje += (
+                f"*{idx})* 👤 *Nombre:* {p['nombre']}\n"
+                f"   📞 *Número de teléfono:* `{p['telefono']}`\n"
+                f"   📦 *Pedido:* {p['cantidad']}x {p['tipo_pedido']}\n"
+                f"   💵 *Monto:* {monto_formateado} Bs\n"
+                f"   ⏰ *Hora:* {p['hora']}\n\n"
+            )
 
     await update.message.reply_text(mensaje, parse_mode="Markdown")
 
@@ -710,7 +724,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado correctamente y listo para funcionar...")
+    print("Bot actualizado correctamente con el nuevo formato de estadísticas...")
     application.run_polling()
 
 
