@@ -91,6 +91,10 @@ class DummyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot de Potabilizadora Gual Espana activo y operando!")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
     def log_message(self, format, *args):
         pass
 
@@ -724,7 +728,7 @@ def main():
     )
     application.add_handler(MessageHandler((filters.TEXT | filters.LOCATION | filters.CONTACT | filters.PHOTO) & ~filters.COMMAND, manejar_mensajes))
 
-    print("Bot actualizado correctamente con el nuevo formato de estadísticas...")
+    print("Bot actualizado correctamente con soporte HEAD para UptimeRobot...")
     application.run_polling()
 
 
